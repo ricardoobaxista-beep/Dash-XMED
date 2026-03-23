@@ -2940,7 +2940,7 @@ function renderJustificativas() {
 //  SINCRONIZAR GOOGLE SHEETS
 // ===========================
 const GSHEETS_URLS = {
-  producao:   'https://docs.google.com/spreadsheets/d/e/2PACX-1vQZYC_E1itVT54U_cubVSu-mA4ElLm2MT04actQ0oZeTb4AAtcTzZCwAeSnBAFdRKNHDRjGl4DASBKb/pub?gid=1341044311&single=true&output=csv',
+  producao:   'https://docs.google.com/spreadsheets/d/e/2PACX-1vQZYC_E1itVT54U_cubVSu-mA4ElLm2MT04actQ0oZeTb4AAtcTzZCwAeSnBAFdRKNHDRjGl4DASBKb/pub?gid=1839640723&single=true&output=csv',
   cancelados: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQZYC_E1itVT54U_cubVSu-mA4ElLm2MT04actQ0oZeTb4AAtcTzZCwAeSnBAFdRKNHDRjGl4DASBKb/pub?gid=746607271&single=true&output=csv',
 };
 
@@ -3030,7 +3030,11 @@ async function sincronizarGSheets() {
     const csv = await fetchCSV(GSHEETS_URLS.producao);
     parseCSV(csv);
     mostrar('Produção carregada ✓', `${records.length} registros · ${justificativas.length} justificativas`);
-    await new Promise(r => setTimeout(r, 500));
+
+    // Mostra amostras das datas para diagnóstico
+    const amostrasDatas = [...new Set(records.slice(0,20).map(r => r.data))].slice(0,6);
+    if (sub) sub.textContent = `${records.length} registros · Datas: ${amostrasDatas.join(', ')}`;
+    await new Promise(r => setTimeout(r, 800));
 
     if (GSHEETS_URLS.cancelados) {
       mostrar('Buscando cancelados...', GSHEETS_URLS.cancelados.slice(0, 60) + '...');
@@ -3469,39 +3473,47 @@ function parseExcelRows(rows) {
 }
 
 function parseCSV(text) {
-  // Sem conversão manual de encoding — o FileReader já cuida disso com readAsText(...,'UTF-8')
-  // A tentativa de recodificar via charCodeAt/Uint8Array pode corromper strings Unicode
-
-  // Parser CSV robusto — usa csvParaRows que já lida com aspas e vírgulas
   const rows = csvParaRows(text);
   if (!rows.length) return;
 
   const newRecords = [];
   const newJusts   = [];
 
-  // Normaliza cabeçalhos
   const normalizeKey = k => k.trim().toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
     .replace(/\s+/g,'_')
     .replace(/[^a-z0-9_]/g,'');
 
-  rows.forEach(rawRow => {
+  // Normaliza chaves de todas as linhas de uma vez
+  const rowsNorm = rows.map(rawRow => {
     const row = {};
     Object.keys(rawRow).forEach(k => { row[normalizeKey(k)] = rawRow[k]; });
+    return row;
+  });
 
+  // Detecta mês dominante para resolver datas ambíguas (ex: 3/5 = março ou maio?)
+  const mesRef = mesDoMinante(rowsNorm, 'data');
+  console.log(`[parseCSV] mês de referência detectado: ${mesRef}`);
+
+  rowsNorm.forEach(row => {
     const equipe = normalizeEquipe(row.equipe || row.team || '');
     if (!equipe) return;
 
-    const dataRaw  = row.data || row.date || '';
-    const dataStr  = normalizeDateGSheets(dataRaw);
+    const dataRaw = row.data || row.date || '';
+    const dataStr = toYMD(dataRaw, mesRef);
+
+    if (newRecords.length < 10) {
+      console.log(`[DEBUG DATA] raw="${dataRaw}" -> "${dataStr}"`);
+    }
+
     if (!dataStr) return;
 
-    const mes          = parseInt(dataStr.split('-')[1]);
-    const valor        = parseValor(row.valor || row.value || '0');
-    const os           = row.os || row.ordem_servico || '';
-    const tipoServico  = row.tipo_servico || row.tipo || '';
-    const diasSem      = parseInt(row.dias_sem_prod || '0') || 0;
-    const justif       = row.justificativa || row.motivo || '';
+    const mes         = parseInt(dataStr.split('-')[1]);
+    const valor       = parseValor(row.valor || row.value || '0');
+    const os          = row.os || row.ordem_servico || '';
+    const tipoServico = row.tipo_servico || row.tipo || '';
+    const diasSem     = parseInt(row.dias_sem_prod || '0') || 0;
+    const justif      = row.justificativa || row.motivo || '';
 
     const isFolga = ['F','FOLGA'].includes(tipoServico.trim().toUpperCase());
     if (isFolga || os || valor > 0) {
@@ -3854,13 +3866,31 @@ function parseValor(raw) {
 
 // ===========================
 //  ENGINE DE DATA UNIFICADA
-//  Reconhece todos os formatos:
-//  YYYY-MM-DD | DD/MM/YYYY | DD-MM-YYYY | DD.MM.YYYY
-//  M/D/YYYY (Google Sheets) | MM/DD/YYYY | Serial Excel | Date object
 // ===========================
-function toYMD(val) {
+
+// Analisa linhas e retorna o mês dominante (baseado em datas inequívocas)
+function mesDoMinante(linhas, colData) {
+  const contMes = {};
+  linhas.forEach(row => {
+    const v = String(row[colData] || '').trim();
+    const sep = v.includes('/') ? '/' : v.includes('.') ? '.' : v.includes('-') ? '-' : null;
+    if (!sep) return;
+    const parts = v.split(sep).map(p => parseInt(p));
+    if (parts.length !== 3) return;
+    const [a, b, c] = parts;
+    if (!c || c < 2000) return;
+    // Inequívoco: um dos valores > 12 revela o mês
+    if (a > 12 && b >= 1 && b <= 12) contMes[b] = (contMes[b]||0) + 1;
+    else if (b > 12 && a >= 1 && a <= 12) contMes[a] = (contMes[a]||0) + 1;
+  });
+  if (!Object.keys(contMes).length) return null;
+  return parseInt(Object.entries(contMes).sort((x,y)=>y[1]-x[1])[0][0]);
+}
+
+// Converte valor bruto em YYYY-MM-DD
+// mesRef: mês esperado para resolver ambiguidade (se null, usa DM/BR como padrão)
+function toYMD(val, mesRef) {
   if (!val && val !== 0) return '';
-  // Date object
   if (val instanceof Date) {
     if (isNaN(val)) return '';
     const y = val.getFullYear();
@@ -3870,14 +3900,13 @@ function toYMD(val) {
   const s = String(val).trim();
   if (!s || s === 'null' || s === 'undefined' || s === '-') return '';
 
-  // YYYY-MM-DD ja ok
+  // YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
     const part = s.slice(0,10);
-    const d = new Date(part + 'T00:00:00');
-    return isNaN(d) ? '' : part;
+    return isNaN(new Date(part+'T00:00:00')) ? '' : part;
   }
 
-  // Serial numerico do Excel (40000-60000)
+  // Serial Excel
   if (/^\d{4,5}(\.\d+)?$/.test(s)) {
     const n = parseFloat(s);
     if (n > 40000 && n < 60000) {
@@ -3886,49 +3915,60 @@ function toYMD(val) {
     }
   }
 
-  // Detecta separador: / - .
   const sep = s.includes('/') ? '/' : s.includes('.') ? '.' : s.includes('-') ? '-' : null;
   if (sep) {
     const parts = s.split(sep).map(p => p.trim());
     if (parts.length === 3) {
       const [a, b, c] = parts;
-
-      // Ano primeiro (YYYY/MM/DD ou YYYY-MM-DD)
+      // Ano primeiro: YYYY/MM/DD
       if (a.length === 4) {
-        const y=parseInt(a), m=parseInt(b), d=parseInt(c);
+        const y=parseInt(a),m=parseInt(b),d=parseInt(c);
         if (y>=1980&&y<=2100&&m>=1&&m<=12&&d>=1&&d<=31)
           return `${a}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
       }
-
-      // Ano no final (2 ou 4 digitos)
       if (c.length >= 2) {
         const ano = c.length === 2 ? '20'+c : c;
         if (parseInt(ano) < 1980 || parseInt(ano) > 2100) return '';
         const x = parseInt(a), y = parseInt(b);
-
-        // x > 12 => certamente é dia => DD/MM/YYYY
-        if (x > 12) return `${ano}-${String(y).padStart(2,'0')}-${String(x).padStart(2,'0')}`;
-        // y > 12 => certamente é dia => MM/DD/YYYY
-        if (y > 12) return `${ano}-${String(x).padStart(2,'0')}-${String(y).padStart(2,'0')}`;
-
-        // Ambíguo (ambos ≤ 12): planilha é brasileira → sempre DD/MM/YYYY
-        // Exemplo: 03/03/2026 → março 3 ✓ | 05/03/2026 → março 5 ✓
-        return `${ano}-${String(y).padStart(2,'0')}-${String(x).padStart(2,'0')}`;
+        // Inequívoco: x>12 → dia com certeza → DD/MM
+        if (x > 12 && y >= 1 && y <= 12)
+          return `${ano}-${String(y).padStart(2,'0')}-${String(x).padStart(2,'0')}`;
+        // Inequívoco: y>12 → dia com certeza → MM/DD
+        if (y > 12 && x >= 1 && x <= 12)
+          return `${ano}-${String(x).padStart(2,'0')}-${String(y).padStart(2,'0')}`;
+        // Ambíguo (ambos ≤ 12)
+        if (x >= 1 && y >= 1 && x <= 12 && y <= 12) {
+          if (mesRef) {
+            // Testa DM: mês = y
+            const resDM = `${ano}-${String(y).padStart(2,'0')}-${String(x).padStart(2,'0')}`;
+            // Testa MD: mês = x
+            const resMD = `${ano}-${String(x).padStart(2,'0')}-${String(y).padStart(2,'0')}`;
+            const mesDM = parseInt(resDM.split('-')[1]);
+            const mesMD = parseInt(resMD.split('-')[1]);
+            if (mesDM === mesRef && mesMD !== mesRef) return resDM; // só DM bate
+            if (mesMD === mesRef && mesDM !== mesRef) return resMD; // só MD bate
+            // Ambos batem ou nenhum bate → usa DM (padrão BR)
+          }
+          // Sem referência ou empate: DM (padrão BR)
+          return `${ano}-${String(y).padStart(2,'0')}-${String(x).padStart(2,'0')}`;
+        }
       }
     }
   }
 
-  // Ultimo recurso: Date nativo do JS
   try {
     const d = new Date(s);
-    if (!isNaN(d.getTime()) && d.getFullYear() >= 1980) {
+    if (!isNaN(d.getTime()) && d.getFullYear() >= 1980)
       return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-    }
   } catch(e) {}
   return '';
 }
 
-// Aliases para compatibilidade com chamadas existentes
+// Alias detectarModoData mantido para compatibilidade
+function detectarModoData(linhas, colData) {
+  return mesDoMinante(linhas, colData); // retorna número do mês dominante
+}
+
 function normalizeDate(str)        { return toYMD(str); }
 function normalizeDateGSheets(val) { return toYMD(val); }
 function parseDate(val) {
