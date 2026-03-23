@@ -2953,50 +2953,51 @@ const CORS_PROXIES = [
 ];
 
 async function fetchCSV(url) {
-  const urlExport = url
-    .replace('/pub?', '/export?format=csv&')
-    .replace('&output=csv', '')
-    .replace('&single=true', '');
-
-  const urls = [url, urlExport];
+  // Garante que a URL termine com &output=csv (formato CSV do Google Sheets)
+  const urlCSV = url.includes('output=csv') ? url : url + (url.includes('?') ? '&' : '?') + 'output=csv';
 
   const lerUTF8 = async (resp) => {
     const buffer = await resp.arrayBuffer();
     return new TextDecoder('utf-8').decode(buffer);
   };
 
-  const isValido = txt => txt && txt.trim().length > 10 && !txt.trim().startsWith('<') && !txt.trim().startsWith('{');
+  // Valida que o conteúdo é CSV real (não HTML de erro ou JSON)
+  const isValido = txt => {
+    if (!txt || txt.trim().length < 10) return false;
+    const t = txt.trim();
+    if (t.startsWith('<') || t.startsWith('{') || t.startsWith('<!')) return false;
+    return true;
+  };
 
-  // 1) Tenta direto (funciona no Vercel publicado)
-  for (const u of urls) {
+  // 1) Tenta fetch direto (funciona quando publicado no Vercel com CORS liberado pelo Google)
+  try {
+    const r = await fetch(urlCSV, { cache: 'no-store' });
+    if (r.ok) {
+      const txt = await lerUTF8(r);
+      if (isValido(txt)) { console.log('✅ Fetch direto OK'); return txt; }
+    }
+  } catch(e) { console.warn('Fetch direto falhou:', e.message); }
+
+  // 2) Tenta cada proxy CORS em ordem
+  for (const proxyFn of CORS_PROXIES) {
     try {
-      const r = await fetch(u, { cache: 'no-store' });
+      const proxyUrl = proxyFn(urlCSV);
+      console.log('Tentando proxy:', proxyUrl.slice(0, 50) + '...');
+      const r = await fetch(proxyUrl, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
       if (r.ok) {
         const txt = await lerUTF8(r);
-        if (isValido(txt)) { console.log('✅ Fetch direto OK'); return txt; }
+        if (isValido(txt)) { console.log('✅ Proxy OK:', proxyUrl.slice(0, 50)); return txt; }
+        console.warn('Proxy retornou conteúdo inválido');
       }
-    } catch(e) {}
-  }
-  console.warn('Fetch direto falhou, tentando proxies...');
-
-  // 2) Tenta cada proxy
-  for (const proxyFn of CORS_PROXIES) {
-    for (const u of urls) {
-      try {
-        const proxyUrl = proxyFn(u);
-        const r = await fetch(proxyUrl, { cache: 'no-store' });
-        if (r.ok) {
-          const txt = await lerUTF8(r);
-          if (isValido(txt)) { console.log('✅ Proxy OK:', proxyUrl.slice(0,40)); return txt; }
-        }
-      } catch(e) { console.warn('Proxy falhou:', e.message); }
-    }
+    } catch(e) { console.warn('Proxy falhou:', e.message); }
   }
 
   throw new Error(
-    'Não foi possível buscar os dados.\n' +
-    'Verifique se a planilha está publicada:\n' +
-    'Google Sheets → Arquivo → Publicar na Web → selecione a aba → CSV → Publicar'
+    'Não foi possível buscar os dados do Google Sheets.\n\n' +
+    'Verifique:\n' +
+    '1. Planilha está publicada: Arquivo → Publicar na Web → aba → CSV → Publicar\n' +
+    '2. O link copiado termina com &output=csv\n' +
+    '3. Conexão com a internet ativa'
   );
 }
 
@@ -3012,33 +3013,37 @@ async function sincronizarGSheets() {
   const spinner = document.getElementById('syncSpinner');
   const btn     = document.getElementById('btnSincronizar');
 
-  const mostrar = (msg, detalhe) => { title.textContent = msg; if (sub) sub.textContent = detalhe; };
+  const mostrar = (msg, detalhe='') => {
+    if (title) title.textContent = msg;
+    if (sub)   sub.textContent   = detalhe;
+  };
 
   overlay.classList.add('active');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Sincronizando...'; }
-  mostrar('Conectando...', 'Buscando dados do Google Sheets');
+  mostrar('Conectando ao Google Sheets...', 'Aguarde');
 
   try {
-    mostrar('Buscando produção...', 'Aguarde...');
+    // Limpa dados anteriores antes de recarregar
+    records = []; justificativas = []; cancelados = [];
+
+    mostrar('Buscando produção...', GSHEETS_URLS.producao.slice(0, 60) + '...');
     const csv = await fetchCSV(GSHEETS_URLS.producao);
-    records = []; justificativas = []; // limpa antes de recarregar
     parseCSV(csv);
-    mostrar('Produção carregada ✓', `${records.length} registros encontrados`);
-    await new Promise(r => setTimeout(r, 400));
+    mostrar('Produção carregada ✓', `${records.length} registros · ${justificativas.length} justificativas`);
+    await new Promise(r => setTimeout(r, 500));
 
     if (GSHEETS_URLS.cancelados) {
-      mostrar('Buscando cancelados...', 'Aguarde...');
+      mostrar('Buscando cancelados...', GSHEETS_URLS.cancelados.slice(0, 60) + '...');
       const csv2 = await fetchCSV(GSHEETS_URLS.cancelados);
       const rows2 = csvParaRows(csv2);
-      cancelados = [];
       parseCancelados(rows2);
-      mostrar('Cancelados carregados ✓', `${cancelados.length} registros encontrados`);
+      mostrar('Cancelados carregados ✓', `${cancelados.length} cancelamentos`);
       await new Promise(r => setTimeout(r, 400));
     }
 
     if (spinner) { spinner.style.animation = 'none'; spinner.innerHTML = '<div style="font-size:32px;line-height:48px">✅</div>'; }
-    mostrar('✅ Sincronizado com sucesso!',
-      `Produção: ${records.length} reg · Cancelados: ${cancelados.length} reg · ${new Date().toLocaleTimeString('pt-BR')}`);
+    mostrar('✅ Sincronizado!',
+      `Produção: ${records.length} reg · Cancelados: ${cancelados.length} · ${new Date().toLocaleTimeString('pt-BR')}`);
 
     afterImport();
 
@@ -3048,10 +3053,12 @@ async function sincronizarGSheets() {
 
   } catch(err) {
     console.error('Erro sync:', err);
-    mostrar('❌ Erro na sincronização', err.message);
     if (spinner) { spinner.style.animation = 'none'; spinner.innerHTML = '<div style="font-size:32px;line-height:48px">❌</div>'; }
+    mostrar('❌ Falha na sincronização', err.message.split('\n')[0]);
+    if (sub) sub.style.whiteSpace = 'pre-wrap';
     if (btn) { btn.disabled = false; btn.textContent = '🔄 Sincronizar'; }
-    await new Promise(r => setTimeout(r, 3500));
+    showToast('❌ ' + err.message.split('\n')[0], 'erro', 7000);
+    await new Promise(r => setTimeout(r, 4000));
 
   } finally {
     overlay.classList.remove('active');
@@ -3818,139 +3825,116 @@ function normalizeEquipe(str) {
 
 // Normaliza data vinda do Google Sheets — formato M/D/YYYY (americano)
 // Ex: 2/1/2026 → 2026-02-01
-function normalizeDateGSheets(val) {
-  if (!val && val !== 0) return '';
-  // Date object (SheetJS entrega Date em alguns modos)
-  if (val instanceof Date) {
-    if (isNaN(val)) return '';
-    const y = val.getFullYear(), mo = String(val.getMonth()+1).padStart(2,'0'), d = String(val.getDate()).padStart(2,'0');
-    return `${y}-${mo}-${d}`;
-  }
-  const str = String(val).trim();
-  if (!str || str === 'null' || str === 'undefined') return '';
-  // YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
-  // MM-DD-YY (formato mm-dd-yy do Excel)
-  const mdy2 = str.match(/^(\d{1,2})-(\d{1,2})-(\d{2})$/);
-  if (mdy2) return `20${mdy2[3]}-${mdy2[1].padStart(2,'0')}-${mdy2[2].padStart(2,'0')}`;
-  // M/D/YYYY ou MM/DD/YYYY
-  const mx = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (mx) {
-    const mes=parseInt(mx[1]), dia=parseInt(mx[2]), ano=mx[3];
-    if (mes>=1&&mes<=12&&dia>=1&&dia<=31) return `${ano}-${String(mes).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
-  }
-  // Serial Excel numérico
-  if (/^\d{4,5}$/.test(str)) {
-    const n = parseInt(str);
-    if (n > 40000 && n < 60000) {
-      const dt = new Date(new Date(1899,11,30).getTime() + n*86400000);
-      return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
-    }
-  }
-  return normalizeDate(str);
-}
-
-function normalizeDate(str) {
-  if (!str || str === 'null' || str === 'undefined') return '';
-  str = str.trim();
-
-  // YYYY-MM-DD (já ok)
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
-
-  // DD/MM/YYYY ou M/D/YYYY (detecta automaticamente pelo valor dos campos)
-  const mx = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (mx) {
-    const a = parseInt(mx[1]), b = parseInt(mx[2]);
-    // Se o primeiro número > 12, certamente é dia (DD/MM/YYYY)
-    // Se o segundo > 12, o primeiro é mês (MM/DD/YYYY)
-    // Padrão brasileiro: interpretar como DD/MM/YYYY
-    if (b > 12) {
-      // M/DD/YYYY → impossível ser mês no segundo campo, então: MM/DD/YYYY
-      return `${mx[3]}-${mx[1].padStart(2,'0')}-${mx[2].padStart(2,'0')}`;
-    }
-    // Assume DD/MM/YYYY (padrão BR)
-    return `${mx[3]}-${mx[2].padStart(2,'0')}-${mx[1].padStart(2,'0')}`;
-  }
-
-  // DD-MM-YYYY
-  const m3 = str.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
-  if (m3) return `${m3[3]}-${m3[2].padStart(2,'0')}-${m3[1].padStart(2,'0')}`;
-
-  // Tenta via Date nativo (último recurso)
-  try {
-    const d = new Date(str);
-    if (!isNaN(d.getTime())) {
-      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-    }
-  } catch(e) {}
-
-  return '';
-}
-
 // Converte qualquer formato de valor monetário para número
-// Aceita: 1234.56 | 1.234,56 | R$ 1.234,56 | R$1234,56 | "1,234.56"
+// Aceita: 1234.56 | 1.234,56 | R$ 1.234,56 | "1,234.56" | 206,22
 function parseValor(raw) {
   if (raw === null || raw === undefined || raw === '') return 0;
-  if (typeof raw === 'number') return raw;
-  let s = String(raw).trim();
-  // Remove símbolo de moeda e espaços
-  s = s.replace(/R\$\s*/gi, '').trim();
-  // Detecta formato: se tem ponto E vírgula, o último separador é o decimal
-  const temPonto  = s.includes('.');
+  if (typeof raw === 'number') return isNaN(raw) ? 0 : raw;
+  let s = String(raw).trim().replace(/R\$\s*/gi, '').trim();
+  if (!s) return 0;
+  const temPonto   = s.includes('.');
   const temVirgula = s.includes(',');
   if (temPonto && temVirgula) {
-    // Ex: 1.234,56 (BR) ou 1,234.56 (EN)
-    const ultPonto   = s.lastIndexOf('.');
-    const ultVirgula = s.lastIndexOf(',');
-    if (ultVirgula > ultPonto) {
-      // BR: 1.234,56 → remove pontos, troca vírgula por ponto
-      s = s.replace(/\./g, '').replace(',', '.');
+    // 1.234,56 (BR) ou 1,234.56 (EN) — o último separador é o decimal
+    if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
+      s = s.replace(/\./g, '').replace(',', '.');      // BR
     } else {
-      // EN: 1,234.56 → remove vírgulas
-      s = s.replace(/,/g, '');
+      s = s.replace(/,/g, '');                          // EN
     }
   } else if (temVirgula) {
-    // Só vírgula: pode ser milhar (1,234) ou decimal (1,56)
     const partes = s.split(',');
-    if (partes.length === 2 && partes[1].length <= 2) {
-      // Decimal: 1234,56
-      s = s.replace(',', '.');
-    } else {
-      // Milhar: 1,234,567 → remove vírgulas
-      s = s.replace(/,/g, '');
-    }
+    // Vírgula decimal (206,22) ou milhar (1,234)
+    s = (partes.length === 2 && partes[1].length <= 2)
+      ? s.replace(',', '.')   // decimal
+      : s.replace(/,/g, '');  // milhar
   }
-  // Remove qualquer caractere não numérico restante (exceto ponto e sinal)
   s = s.replace(/[^\d.-]/g, '');
   return parseFloat(s) || 0;
 }
 
-function parseDate(str) {
-  if (!str && str !== 0) return null;
-  if (str instanceof Date) return isNaN(str) ? null : str;
-  const s = String(str).trim();
-  if (!s || s === 'null') return null;
-  // YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(s + 'T00:00:00');
-  // DD/MM/YYYY
-  if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
-    const [d,m,y] = s.split('/'); return new Date(`${y}-${m}-${d}T00:00:00`);
+// ===========================
+//  ENGINE DE DATA UNIFICADA
+//  Reconhece todos os formatos:
+//  YYYY-MM-DD | DD/MM/YYYY | DD-MM-YYYY | DD.MM.YYYY
+//  M/D/YYYY (Google Sheets) | MM/DD/YYYY | Serial Excel | Date object
+// ===========================
+function toYMD(val) {
+  if (!val && val !== 0) return '';
+  // Date object
+  if (val instanceof Date) {
+    if (isNaN(val)) return '';
+    const y = val.getFullYear();
+    if (y < 1980 || y > 2100) return '';
+    return `${y}-${String(val.getMonth()+1).padStart(2,'0')}-${String(val.getDate()).padStart(2,'0')}`;
   }
-  // MM-DD-YY ou MM/DD/YY (formato Excel exportado)
-  if (/^\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4}$/.test(s)) {
-    const sep = s.includes('/') ? '/' : '-';
-    const [mm,dd,yy] = s.split(sep);
-    const yyyy = yy.length === 2 ? '20' + yy : yy;
-    return new Date(`${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}T00:00:00`);
+  const s = String(val).trim();
+  if (!s || s === 'null' || s === 'undefined' || s === '-') return '';
+
+  // YYYY-MM-DD ja ok
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const part = s.slice(0,10);
+    const d = new Date(part + 'T00:00:00');
+    return isNaN(d) ? '' : part;
   }
-  // Serial numérico do Excel (ex: 46000)
+
+  // Serial numerico do Excel (40000-60000)
   if (/^\d{4,5}(\.\d+)?$/.test(s)) {
     const n = parseFloat(s);
     if (n > 40000 && n < 60000) {
-      return new Date(new Date(1899,11,30).getTime() + n * 86400000);
+      const dt = new Date(new Date(1899,11,30).getTime() + n * 86400000);
+      return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
     }
   }
-  const d = new Date(str);
+
+  // Detecta separador: / - .
+  const sep = s.includes('/') ? '/' : s.includes('.') ? '.' : s.includes('-') ? '-' : null;
+  if (sep) {
+    const parts = s.split(sep).map(p => p.trim());
+    if (parts.length === 3) {
+      const [a, b, c] = parts;
+
+      // Ano primeiro (YYYY/MM/DD ou YYYY-MM-DD)
+      if (a.length === 4) {
+        const y=parseInt(a), m=parseInt(b), d=parseInt(c);
+        if (y>=1980&&y<=2100&&m>=1&&m<=12&&d>=1&&d<=31)
+          return `${a}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      }
+
+      // Ano no final (2 ou 4 digitos)
+      if (c.length >= 2) {
+        const ano = c.length === 2 ? '20'+c : c;
+        if (parseInt(ano) < 1980 || parseInt(ano) > 2100) return '';
+        const x = parseInt(a), y = parseInt(b);
+
+        // x > 12 => certamente é dia => DD/MM/YYYY
+        if (x > 12) return `${ano}-${String(y).padStart(2,'0')}-${String(x).padStart(2,'0')}`;
+        // y > 12 => certamente é dia => MM/DD/YYYY
+        if (y > 12) return `${ano}-${String(x).padStart(2,'0')}-${String(y).padStart(2,'0')}`;
+
+        // Ambíguo (ambos ≤ 12): planilha é brasileira → sempre DD/MM/YYYY
+        // Exemplo: 03/03/2026 → março 3 ✓ | 05/03/2026 → março 5 ✓
+        return `${ano}-${String(y).padStart(2,'0')}-${String(x).padStart(2,'0')}`;
+      }
+    }
+  }
+
+  // Ultimo recurso: Date nativo do JS
+  try {
+    const d = new Date(s);
+    if (!isNaN(d.getTime()) && d.getFullYear() >= 1980) {
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+  } catch(e) {}
+  return '';
+}
+
+// Aliases para compatibilidade com chamadas existentes
+function normalizeDate(str)        { return toYMD(str); }
+function normalizeDateGSheets(val) { return toYMD(val); }
+function parseDate(val) {
+  const ymd = toYMD(val);
+  if (!ymd) return null;
+  const d = new Date(ymd + 'T00:00:00');
   return isNaN(d) ? null : d;
 }
 
