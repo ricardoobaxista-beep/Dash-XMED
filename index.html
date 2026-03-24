@@ -316,7 +316,7 @@
 
   /* KPI CARDS */
   .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-  #equipes-kpi { grid-template-columns: repeat(5, 1fr); }
+  #equipes-kpi { grid-template-columns: repeat(3, 1fr); }
   .kpi-card {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -803,8 +803,6 @@
     <div class="team-badge"><div class="dot" style="background:#00d4ff"></div>XMED-01 CASCAVEL</div>
     <div class="team-badge"><div class="dot" style="background:#ff6b35"></div>XMED-02 CASCAVEL</div>
     <div class="team-badge"><div class="dot" style="background:#7eff6b"></div>XMED-03 MARACANAU</div>
-    <div class="team-badge"><div class="dot" style="background:#ffcc00"></div>XMED-04 CAUCAIA</div>
-    <div class="team-badge"><div class="dot" style="background:#a855f7"></div>XMED-05 BATURITE</div>
   </div>
 </aside>
 
@@ -897,8 +895,6 @@
           <option value="XMED-01">XMED-01 (CASCAVEL)</option>
           <option value="XMED-02">XMED-02 (CASCAVEL)</option>
           <option value="XMED-03">XMED-03 (MARACANAU)</option>
-          <option value="XMED-04">XMED-04 (CAUCAIA)</option>
-          <option value="XMED-05">XMED-05 (BATURITE)</option>
         </select>
       </div>
       <div class="kpi-grid">
@@ -984,8 +980,6 @@
           <option value="XMED-01">XMED-01 (CASCAVEL)</option>
           <option value="XMED-02">XMED-02 (CASCAVEL)</option>
           <option value="XMED-03">XMED-03 (MARACANAU)</option>
-          <option value="XMED-04">XMED-04 (CAUCAIA)</option>
-          <option value="XMED-05">XMED-05 (BATURITE)</option>
         </select>
       </div>
 
@@ -1045,8 +1039,6 @@
           <option value="XMED-01">XMED-01 (CASCAVEL)</option>
           <option value="XMED-02">XMED-02 (CASCAVEL)</option>
           <option value="XMED-03">XMED-03 (MARACANAU)</option>
-          <option value="XMED-04">XMED-04 (CAUCAIA)</option>
-          <option value="XMED-05">XMED-05 (BATURITE)</option>
         </select>
       </div>
       <div class="charts-row3">
@@ -1133,8 +1125,6 @@
           <option value="XMED-01">XMED-01 (CASCAVEL)</option>
           <option value="XMED-02">XMED-02 (CASCAVEL)</option>
           <option value="XMED-03">XMED-03 (MARACANAU)</option>
-          <option value="XMED-04">XMED-04 (CAUCAIA)</option>
-          <option value="XMED-05">XMED-05 (BATURITE)</option>
         </select>
         <label>Motivo:</label>
         <select id="filtroMotivoJust" onchange="renderJustificativas()">
@@ -1176,8 +1166,6 @@
           <option value="XMED-01">XMED-01 (CASCAVEL)</option>
           <option value="XMED-02">XMED-02 (CASCAVEL)</option>
           <option value="XMED-03">XMED-03 (MARACANAU)</option>
-          <option value="XMED-04">XMED-04 (CAUCAIA)</option>
-          <option value="XMED-05">XMED-05 (BATURITE)</option>
         </select>
         <label>Motivo:</label>
         <select id="filtroMotivoCanel" onchange="renderCancelados()">
@@ -1334,8 +1322,6 @@ data,mês,equipe,OS,valor,tipo_servico,dias_sem_prod,justificativa
         <option value="XMED-01">XMED-01 (CASCAVEL)</option>
         <option value="XMED-02">XMED-02 (CASCAVEL)</option>
         <option value="XMED-03">XMED-03 (MARACANAU)</option>
-        <option value="XMED-04">XMED-04 (CAUCAIA)</option>
-        <option value="XMED-05">XMED-05 (BATURITE)</option>
       </select>
     </div>
     <div class="form-group">
@@ -1379,8 +1365,6 @@ data,mês,equipe,OS,valor,tipo_servico,dias_sem_prod,justificativa
         <option value="XMED-01">XMED-01 (CASCAVEL)</option>
         <option value="XMED-02">XMED-02 (CASCAVEL)</option>
         <option value="XMED-03">XMED-03 (MARACANAU)</option>
-        <option value="XMED-04">XMED-04 (CAUCAIA)</option>
-        <option value="XMED-05">XMED-05 (BATURITE)</option>
       </select>
     </div>
     <div class="form-group">
@@ -1427,14 +1411,14 @@ function setLastUpdate() {
 
 let justificativas = []; // { data, equipe, motivo, descricao }
 
-const META_MENSAL = 57000; // Meta mensal fixa de todas as equipes
+const META_MENSAL = 57000; // Meta mensal fixa por equipe (3 equipes ativas)
 
 const TEAMS = [
   { id: 'XMED-01', name: 'XMED-01 (CASCAVEL)',  color: '#00d4ff' },
   { id: 'XMED-02', name: 'XMED-02 (CASCAVEL)',  color: '#ff6b35' },
   { id: 'XMED-03', name: 'XMED-03 (MARACANAU)', color: '#7eff6b' },
-  { id: 'XMED-04', name: 'XMED-04 (CAUCAIA)',   color: '#ffcc00' },
-  { id: 'XMED-05', name: 'XMED-05 (BATURITE)',  color: '#a855f7' },
+
+
 ];
 
 // Calcula meta diária = META_MENSAL / dias úteis da equipe no período
@@ -2468,9 +2452,9 @@ function renderEquipes() {
 
     const diasQueTrabalha = Math.max(0, totalDiasMes - diasFolga.size);
 
-    // Meta diária = R$ 67.000 ÷ dias que a equipe trabalha no mês
+    // Meta diária = R$ 57.000 ÷ dias que a equipe trabalha no mês
     const metaDiaria = diasQueTrabalha > 0 ? META_MENSAL / diasQueTrabalha : 0;
-    const metaAcum   = META_MENSAL; // meta do período é sempre 67k (por mês)
+    const metaAcum   = META_MENSAL; // meta do período é sempre 57k (por mês)
 
     const dias    = diasTrab.size;
     const parados = diasParados.size;
@@ -2481,7 +2465,7 @@ function renderEquipes() {
       ? `R$ ${fmt(metaDiaria)}`
       : `<span style="color:var(--muted)">—</span>`;
     const formulaLabel = diasQueTrabalha > 0
-      ? `<span style="font-size:9px;color:var(--muted);font-family:'JetBrains Mono',monospace"> (R$67k ÷ ${diasQueTrabalha} dias)</span>`
+      ? `<span style="font-size:9px;color:var(--muted);font-family:'JetBrains Mono',monospace"> (R$57k ÷ ${diasQueTrabalha} dias)</span>`
       : '';
 
     return `<div class="kpi-card">
@@ -3813,20 +3797,16 @@ function normalizeEquipe(str) {
     .normalize('NFD').replace(/[\u0300-\u036f]/g,''); // remove acentos
 
   // Match direto por número: XMED-01, XMED01, XMED-01(CASCAVEL), XMED-01 (CASCAVEL)
-  const m = str.match(/XMED[-_\s]?0*([1-5])\b/);
+  const m = str.match(/XMED[-_\s]?0*([1-3])\b/);
   if (m) return 'XMED-0' + m[1];
 
   // Por número isolado (fallback)
   if (/\b01\b/.test(str)) return 'XMED-01';
   if (/\b02\b/.test(str)) return 'XMED-02';
   if (/\b03\b/.test(str)) return 'XMED-03';
-  if (/\b04\b/.test(str)) return 'XMED-04';
-  if (/\b05\b/.test(str)) return 'XMED-05';
 
   // Por cidade (sem acento após normalize)
   if (str.includes('MARACANAU') || str.includes('MARACAN')) return 'XMED-03';
-  if (str.includes('CAUCAIA'))                               return 'XMED-04';
-  if (str.includes('BATURITE') || str.includes('BATURIT'))  return 'XMED-05';
   if (str.includes('CASCAVEL')) {
     // Cascavel tem XMED-01 e XMED-02 — não é possível distinguir só pela cidade
     // Retorna null para não mapear errado; o ID numérico deve estar presente
@@ -4019,7 +3999,7 @@ function loadDemoData() {
       for (let d = 0; d < diasTrab; d++) {
         const dia = Math.floor(Math.random()*27) + 1;
         const date = `2025-${String(mes+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
-        const base = { 'XMED-01': 3200, 'XMED-02': 3100, 'XMED-03': 2900, 'XMED-04': 3300, 'XMED-05': 2800 }[t.id] || 3000;
+        const base = { 'XMED-01': 3200, 'XMED-02': 3100, 'XMED-03': 2900 }[t.id] || 3000;
         const valor = base * (0.6 + Math.random()*0.8) / diasTrab * (1 + d/diasTrab*0.3);
         records.push({ data: date, mes: mes+1, equipe: t.id, os: `OS-${++osNum}`, valor: Math.round(valor * 100)/100, tipo_servico: tipos[Math.floor(Math.random()*tipos.length)] });
       }
@@ -4048,7 +4028,7 @@ function clearData() {
 }
 
 function downloadTemplate() {
-  const csv = `data,equipe,valor,tipo_servico,dias_sem_prod,justificativa\n01/01/2025,XMED-01,12500.00,Consulta,0,\n02/01/2025,XMED-02,8750.50,Exame,0,\n03/01/2025,XMED-03,0,,1,Chuva forte impediu operação\n04/01/2025,XMED-04,15200.00,Procedimento,0,\n05/01/2025,XMED-05,9300.00,Visita Domiciliar,0,\n`;
+  const csv = `data,equipe,valor,tipo_servico,dias_sem_prod,justificativa\n01/01/2025,XMED-01,12500.00,Consulta,0,\n02/01/2025,XMED-02,8750.50,Exame,0,\n03/01/2025,XMED-03,0,,1,Chuva forte impediu operação\n`;
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -4202,7 +4182,7 @@ function autoLoadDemo() {
       for (let d = 0; d < diasTrab; d++) {
         const dia  = Math.floor(Math.random()*27) + 1;
         const date = `${ano}-${String(mes+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
-        const base = { 'XMED-01':3200,'XMED-02':3100,'XMED-03':2900,'XMED-04':3300,'XMED-05':2800 }[t.id] || 3000;
+        const base = { 'XMED-01':3200,'XMED-02':3100,'XMED-03':2900 }[t.id] || 3000;
         const valor = base * (0.7 + Math.random()*0.6) / diasTrab;
         records.push({ data: date, mes: mes+1, equipe: t.id, os: `OS-${++osNum}`, valor: Math.round(valor*100)/100, tipo_servico: tipos[Math.floor(Math.random()*tipos.length)] });
       }
