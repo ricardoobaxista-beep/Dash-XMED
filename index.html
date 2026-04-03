@@ -799,7 +799,7 @@
     </div>
   </nav>
   <div style="border-top:1px solid var(--border);margin:0 16px;padding:8px 0 6px;text-align:center;">
-    <div style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;color:var(--accent);letter-spacing:1.5px;margin-bottom:4px;">Desenvolvido por Ricardo Lucas</div>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:1px;margin-bottom:4px;">Desenvolvido por Ricardo Lucas</div>
     <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:1px;">© 2026 | Gestão &amp; Analytics</div>
   </div>
   <div class="teams-badges">
@@ -932,8 +932,8 @@
         <div class="chart-card">
           <div class="section-header">
             <div>
-              <div class="section-title">Faturamento Mensal</div>
-              <div class="section-sub">Evolução por equipe — 12 meses</div>
+              <div class="section-title">Evolução Faturamento vs. Produção</div>
+              <div class="section-sub">Análise dos últimos meses</div>
             </div>
           </div>
           <canvas id="chartFatMensal"></canvas>
@@ -1678,57 +1678,95 @@ function renderDashboard() {
     });
   }
 
-  // Chart: Faturamento mensal por equipe
+  // Chart: Evolução Faturamento vs. Produção (barras OS + linha faturamento)
   destroyChart('chartFatMensal');
   const ctx1 = document.getElementById('chartFatMensal').getContext('2d');
-  const monthData = {};
+
+  // Agrupa por mês: faturamento total e OS totais
+  const fatPorMes = {};
+  const osPorMes  = {};
   recsF.forEach(r => {
     const d = parseDate(r.data);
     if (!d) return;
-    const key = d.getMonth();
-    if (!monthData[key]) monthData[key] = {};
-    TEAMS.forEach(t => { if (!monthData[key][t.id]) monthData[key][t.id] = 0; });
-    monthData[key][r.equipe] = (monthData[key][r.equipe] || 0) + r.valor;
+    const key = d.getMonth(); // 0-11
+    fatPorMes[key] = (fatPorMes[key] || 0) + r.valor;
+    if (isOSValida(r.os)) osPorMes[key] = (osPorMes[key] || 0) + 1;
   });
-  const labels = MONTHS;
-  // Meta por mês/equipe = metaDiaria × dias úteis reais daquele mês (descontando folgas)
+
+  // Usa apenas os meses que têm dados, ordenados
+  const mesesComDados = Object.keys(fatPorMes).map(Number).sort((a,b) => a-b);
+  const labelsEvo   = mesesComDados.map(m => MONTHS[m]);
+  const dataFat     = mesesComDados.map(m => fatPorMes[m] || 0);
+  const dataOS      = mesesComDados.map(m => osPorMes[m]  || 0);
+
   charts['chartFatMensal'] = new Chart(ctx1, {
     type: 'bar',
     data: {
-      labels,
+      labels: labelsEvo,
       datasets: [
-        ...TEAMS.map(t => ({
-          label: t.name,
-          data: MONTHS.map((_,i) => (monthData[i] || {})[t.id] || 0),
-          backgroundColor: teamColor(t.id, 0.8),
-          borderRadius: 4,
-          stack: 'real',
-        })),
-        ...TEAMS.map(t => ({
-          label: `Meta ${t.name}`,
-          data: MONTHS.map((_,i) => ( META_MENSAL / 22) * calcularDiasUteisMes(t.id, i, records)),
+        {
+          label: 'OS Concluídas',
+          data: dataOS,
+          backgroundColor: 'rgba(255,107,53,0.85)',
+          borderRadius: 5,
+          yAxisID: 'yOS',
+          order: 2,
+        },
+        {
+          label: 'Faturamento (R$)',
+          data: dataFat,
           type: 'line',
-          borderColor: teamColor(t.id, 0.9),
-          borderWidth: 2,
-          borderDash: [6, 3],
-          pointRadius: 0,
-          fill: false,
-          tension: 0,
-          stack: undefined,
-          yAxisID: 'y',
-        }))
+          borderColor: '#00d4ff',
+          backgroundColor: 'rgba(0,212,255,0.12)',
+          borderWidth: 2.5,
+          pointRadius: 5,
+          pointBackgroundColor: '#00d4ff',
+          fill: true,
+          tension: 0.4,
+          yAxisID: 'yFat',
+          order: 1,
+        }
       ]
     },
     options: {
       responsive: true,
-      layout: { padding: { top: 20 } },
+      layout: { padding: { top: 16 } },
+      interaction: { mode: 'index', intersect: false },
       plugins: {
         ...chartDefaults.plugins,
-        legend: { ...chartDefaults.plugins.legend, labels: { ...chartDefaults.plugins.legend.labels, filter: (item) => !item.text.startsWith('Meta ') } },
+        legend: {
+          display: true,
+          position: 'top',
+          align: 'end',
+          labels: {
+            color: '#e8eaf6',
+            font: { family: 'Syne', size: 11 },
+            boxWidth: 12,
+            usePointStyle: true,
+          }
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx => ctx.dataset.label === 'Faturamento (R$)'
+              ? `Faturamento: R$ ${fmt(ctx.parsed.y)}`
+              : `OS Concluídas: ${ctx.parsed.y}`
+          }
+        }
       },
       scales: {
-        x: { stacked: true, grid: { display: false } },
-        y: { stacked: false, ticks: { callback: v => 'R$'+fmtShort(v) } }
+        x: { grid: { display: false }, ticks: { color: '#5a6380', font: { family: 'Syne', size: 11 } } },
+        yFat: {
+          type: 'linear',
+          position: 'left',
+          ticks: { callback: v => 'R$'+fmtShort(v), color: '#00d4ff', font: { family: 'JetBrains Mono', size: 10 } },
+          grid: { color: 'rgba(30,40,64,0.6)' }
+        },
+        yOS: {
+          type: 'linear',
+          position: 'right',
+          ticks: { callback: v => v.toLocaleString('pt-BR'), color: '#ff6b35', font: { family: 'JetBrains Mono', size: 10 } },
+          grid: { display: false }
+        }
       }
     }
   });
